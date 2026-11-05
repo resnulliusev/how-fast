@@ -255,8 +255,9 @@ const CONFIG = {
   },
   game: {
     roundSeconds: 15,
-    vmax: 320,          // km/h, an die sich Dauer-Taps mit tpsMax annähern (nie ganz erreicht)
-    tpsMax: 12,         // mehr Taps pro Sekunde zählen nicht
+    vmax: 320,          // km/h, an die sich Dauer-Taps mit tpsRef annähern (nie ganz erreicht)
+    tpsRef: 12,         // Tap-Rate für vmax (legt fest, wie viel Schub ein Tap gibt)
+    tpsMax: 16,         // mehr Taps pro Sekunde zählen nicht
     responseSec: 2.5,   // Trägheit oben herum: wie lange es dauert, sich dem Endspeed zu nähern
     friction: .12,      // Rollwiderstand: ohne Taps rollt das Auto aus
     windowMs: 1000      // Messfenster für die Tap-Frequenz
@@ -276,7 +277,8 @@ const CONFIG = {
     volume: 0.9,
     style: 'groove',    // 'groove' = dunkler Hard Groove ohne Synths · 'uplift' = Hard Groove + Progressive Trance · 'drift' = dunkler Drift-Techno · 'techno' = Hard-Groove-Track
     bpmStart: 132,      // echtes Track-Tempo beim Start …
-    bpmTop: 160,        // … und bei Höchstgeschwindigkeit
+    bpmTop: 180,        // … Skalenende auf dem Tacho. Praktisch unerreichbar:
+    bpmTopTps: 20,      // so viele Taps/s bräuchte man für bpmTop, gezählt werden aber höchstens tpsMax (16/s ≈ 173 BPM)
     // Eigener Loop: { url:'assets/loop.mp3', bpm:128, beats:16, keepSynth:false }
     // Der Loop wird in 16tel zerlegt und im Spieltempo neu getriggert: schneller ohne Tonhöhenänderung.
     customLoop: null
@@ -333,7 +335,12 @@ const REDUCED = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce
 const $ = id => document.getElementById(id);
 const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
 // Speed → echtes Track-Tempo (BPM). Das ist auch die Zahl, die Tacho, Ergebnis und Story-Grafik zeigen.
-const bpmFor = kmh => CONFIG.audio.bpmStart + (CONFIG.audio.bpmTop - CONFIG.audio.bpmStart) * Math.pow(clamp(kmh / CONFIG.game.vmax), 1.2);
+// Speed, bei dem bpmTop erreicht wäre: Endspeed bei bpmTopTps Taps/s (aus der Fahrphysik, D·v² + F·v = A·tps)
+const V_TOP = (() => {
+  const G = CONFIG.game, D = 1 / (2 * G.responseSec * G.vmax), A = (D * G.vmax * G.vmax + G.friction * G.vmax) / G.tpsRef;
+  return (-G.friction + Math.sqrt(G.friction * G.friction + 4 * D * A * CONFIG.audio.bpmTopTps)) / (2 * D);
+})();
+const bpmFor = kmh => CONFIG.audio.bpmStart + (CONFIG.audio.bpmTop - CONFIG.audio.bpmStart) * Math.pow(clamp(kmh / V_TOP), 1.2);
 const lerp = (a, b, t) => a + (b - a) * t;
 function hash(i) {
   let h = Math.imul((i | 0) ^ 0x9e3779b9, 0x85ebca6b);
@@ -955,7 +962,7 @@ function drawGauge(g, cx, cy, R, val, sub, noDigits) {
     g.strokeStyle = v >= RED ? '#a78bff' : (v <= val ? '#fff' : 'rgba(255,255,255,.5)');
     g.lineWidth = R * (major ? .024 : .011);
     g.beginPath(); g.moveTo(cx + c * r1, cy + sn * r1); g.lineTo(cx + c * r2, cy + sn * r2); g.stroke();
-    if (major) {
+    if (v % 10 === 0) {
       g.fillStyle = v >= RED ? '#a78bff' : '#fff';
       g.font = `italic 900 ${R * .105}px ${DISP}`;
       g.fillText(String(v), cx + c * R * .68, cy + sn * R * .68);
@@ -1653,7 +1660,7 @@ const S = {
    Ergebnis = höchster Speed der Runde. */
 const PHYS = (() => {
   const G = CONFIG.game, D = 1 / (2 * G.responseSec * G.vmax);
-  return { D, F: G.friction, A: (D * G.vmax * G.vmax + G.friction * G.vmax) / G.tpsMax };
+  return { D, F: G.friction, A: (D * G.vmax * G.vmax + G.friction * G.vmax) / G.tpsRef };
 })();
 function tapsPerSecond(now) {
   const w = CONFIG.game.windowMs;
